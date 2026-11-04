@@ -1,22 +1,56 @@
-import { fetchRepoDetails, fetchContributors, fetchReadme, checkFiles } from "@/lib/github";
+
+import {
+    fetchRepoDetails,
+    fetchContributors,
+    fetchReadme,
+    checkFiles,
+} from "@/lib/github";
+
 import { calculateHealthScore } from "@/lib/scoring";
 import { RepoAnalysis } from "@/types";
 
-export async function analyzeRepo(repoUrl: string): Promise<RepoAnalysis> {
+export async function analyzeRepo(
+    repoUrl: string
+): Promise<RepoAnalysis> {
     if (!repoUrl || typeof repoUrl !== "string") {
         throw new Error("Invalid Repository URL");
     }
 
-    // Extract owner/name
-    // Supports: https://github.com/owner/name, github.com/owner/name, owner/name
-    let owner = "", name = "";
-    const cleanUrl = repoUrl.trim().replace(/^https?:\/\/(www\.)?github\.com\//, "");
-    const parts = cleanUrl.split("/");
-    if (parts.length >= 2) {
+    // Remove whitespace and any trailing slash.
+    const cleanUrl = repoUrl.trim().replace(/\/+$/, "");
+
+    let owner = "";
+    let name = "";
+
+    // Support full GitHub URLs and owner/repository format.
+    const githubUrlPattern =
+        /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/?#]+)\/([^/?#]+)/i;
+
+    const match = cleanUrl.match(githubUrlPattern);
+
+    if (match) {
+        owner = match[1];
+        name = match[2];
+    } else if (/^[^/\s]+\/[^/\s]+$/.test(cleanUrl)) {
+        const parts = cleanUrl.split("/");
         owner = parts[0];
         name = parts[1];
     } else {
-        throw new Error("Invalid URL format. Expected github.com/owner/repo");
+        throw new Error(
+            "Invalid URL format. Expected github.com/owner/repository"
+        );
+    }
+
+    // Remove .git and any query string or fragment.
+    name = name
+        .split("?")[0]
+        .split("#")[0]
+        .replace(/\.git$/i, "");
+
+    if (!owner || !name) {
+        throw new Error(
+            "Invalid repository URL. Please enter a valid owner and repository name."
+        );
     }
 
     try {
@@ -29,20 +63,30 @@ export async function analyzeRepo(repoUrl: string): Promise<RepoAnalysis> {
         const [readme, contributors, fileList] = await Promise.all([
             readmePromise,
             contributorsPromise,
-            checkFiles(owner, name, details.defaultBranch)
+            checkFiles(owner, name, details.defaultBranch),
         ]);
 
-        const analysis = calculateHealthScore(details, contributors.length, fileList, readme);
+        const analysis = calculateHealthScore(
+            details,
+            contributors.length,
+            fileList,
+            readme
+        );
 
         return {
             url: `https://github.com/${owner}/${name}`,
             details,
             contributorsCount: contributors.length,
-            ...analysis
+            ...analysis,
         };
     } catch (error: unknown) {
-        console.error(error);
-        const errorMessage = error instanceof Error ? error.message : "Failed to analyze repository";
+        console.error("Repository analysis failed:", error);
+
+        const errorMessage =
+            error instanceof Error
+                ? error.message
+                : "Failed to analyze repository";
+
         throw new Error(errorMessage);
     }
 }
